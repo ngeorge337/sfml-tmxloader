@@ -16,7 +16,7 @@ The following is a (non-exhaustive) list of current bug fixes:
    but the sf::View is never moved
 * Renamed QuadTree files to TMXQuadTree (this was mostly to fix a conflict with LTBL2's QuadTree files)
 * Fixed map properties not being cleared when loading a level, improperly allowing properties to carry over
-   to new loaders in the same MapLoader instance
+   to new levels in the same MapLoader instance
 * GetPropertyString() returns an empty string if the property is not found, instead of throwing an assertion failure
 
 
