@@ -1,10 +1,35 @@
-NOTE: Development of this project is indefinitely suspended in favour of [tmxlite](https://github.com/fallahn/tmxlite)
-which supports generic rendering across C++ frameworks such as SFML and SDL2, requires no external linkage and
-has broader platform support, including mobile devices.
-
-Tiled tmx map loader for SFML 2.0.0
+Tiled TMX Map Loader
 -----------------------------------
+*for SFML 2.x+*
 
+This is a fork of [fallahn/sfml-tmxloader](https://github.com/fallahn/sfml-tmxloader) that
+aims to fix bugs and add missing or useful features.
+
+As of this writing (May 16, 2017), the original repo is shelved in favor of a remade loader.
+Updates to this fork are meant for those who still specifically want to use it with SFML.
+
+The following is a (non-exhaustive) list of current bug fixes:
+
+* Collection of Image tiles that were taller than the map tile height are now properly parsed and placed
+* Fixed returning a signed int instead of unsigned int for map object rotation flags, causing an invalid GID index to return
+* Fixed tile chunks not rendering correctly in the event a map is reloaded with the same MapLoader instance,
+   but the sf::View is never moved
+* Renamed QuadTree files to TMXQuadTree (this was mostly to fix a conflict with LTBL2's QuadTree files)
+* Fixed map properties not being cleared when loading a level, improperly allowing properties to carry over
+   to new loaders in the same MapLoader instance
+* GetPropertyString() returns an empty string if the property is not found, instead of throwing an assertion failure
+
+
+The following are some new features implemented into SFML-TMXLoader:
+
+* Added rotation angle handling for map objects
+* Added a cached sf::ConvexShape member so shape-to-shape intersections can be checked (with SFML).
+   The shape is created and processed for each MapObject
+* Added a numeric hash function for MapObject parent names. Use GetParentHash() to get the hash value.
+   Useful when a parent name must be retreived many times; a hash comparison is much faster than strings.
+
+
+The original readme and license are preserved below since it also contains basic usage information
 
 /*********************************************************************
 
