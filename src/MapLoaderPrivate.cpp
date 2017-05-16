@@ -1,9 +1,10 @@
 /*********************************************************************
-Matt Marchant 2013 - 2016
+Matt Marchant 2013 - 2015
 SFML Tiled Map Loader - https://github.com/bjorn/tiled/wiki/TMX-Map-Format
 						http://trederia.blogspot.com/2013/05/tiled-map-loader-for-sfml.html
 
-Zlib License:
+The zlib license has been used to make this software fully compatible
+with SFML. See http://www.sfml-dev.org/license.php
 
 This software is provided 'as-is', without any express or
 implied warranty. In no event will the authors be held
@@ -26,17 +27,23 @@ it freely, subject to the following restrictions:
    source distribution.
 *********************************************************************/
 
-#include <tmx/MapLoader.hpp>
-#include <tmx/Log.hpp>
-
-#include "miniz.h"
+#include <tmx/MapLoader.h>
+#include <tmx/Log.h>
+#include <zlib.h>
 
 #ifdef _MSC_VER
 #ifdef LoadImage
 #undef LoadImage
 #endif //Loadimage
-#pragma warning(disable: 4800) //forcing int to bool warning
 #endif //_MSC_VER
+
+//this is needed on windows to prevent unresolved external errors
+//alternatively define this in the zlib project before compiling the zlib library
+#ifdef _WIN32
+#ifndef ZLIB_WINAPI
+#define ZLIB_WINAPI 
+#endif //ZLIB_WINAPI
+#endif //_WIN32
 
 #include <cstring>
 #include <sstream>
@@ -44,22 +51,22 @@ it freely, subject to the following restrictions:
 
 namespace
 {
-    //functor for searching by name
-    struct FindByName
-    {
-        explicit FindByName(const std::string& name) : m_name(name){}
-        bool operator () (pugi::xml_node node)
-        {
-            return node.name() == m_name;
-        }
-    private:
-        const std::string m_name;
-    };
+	//functor for searching by name
+	struct FindByName
+	{
+		explicit FindByName(const std::string& name) : m_name(name){}
+		bool operator () (pugi::xml_node node)
+		{
+			return node.name() == m_name;
+		}
+	private:
+		const std::string m_name;
+	};
 }
 
 using namespace tmx;
 
-bool MapLoader::loadFromXmlDoc(const pugi::xml_document& mapDoc)
+bool MapLoader::LoadFromXmlDoc(const pugi::xml_document& mapDoc)
 {
 	//set map properties
 	pugi::xml_node mapNode = mapDoc.child("map");
@@ -68,9 +75,9 @@ bool MapLoader::loadFromXmlDoc(const pugi::xml_document& mapDoc)
 		LOG("Map node not found. Map not loaded.", Logger::Type::Error);
 		return m_mapLoaded = false;
 	}
-	if(!(m_mapLoaded = parseMapNode(mapNode))) return false;
+	if(!(m_mapLoaded = ParseMapNode(mapNode))) return false;
 	//load map textures / tilesets
-	if(!(m_mapLoaded = parseTileSets(mapNode))) return false;
+	if(!(m_mapLoaded = ParseTileSets(mapNode))) return false;
 
 	//actually we need to traverse map node children and parse each layer as found
 	pugi::xml_node currentNode = mapNode.first_child();
@@ -79,53 +86,55 @@ bool MapLoader::loadFromXmlDoc(const pugi::xml_document& mapDoc)
 		std::string name = currentNode.name();
 		if(name == "layer")
 		{
-			if(!(m_mapLoaded = parseLayer(currentNode)))
+			if(!(m_mapLoaded = ParseLayer(currentNode)))
 			{
-				unload(); //purge partially loaded data
+				Unload(); //purge partially loaded data
 				return false;
 			}
 		}
 		else if(name == "imagelayer")
 		{
-			if(!(m_mapLoaded = parseImageLayer(currentNode)))
+			if(!(m_mapLoaded = ParseImageLayer(currentNode)))
 			{
-				unload();
+				Unload();
 				return false;
 			}
 		}
 		else if(name == "objectgroup")
 		{
-			if(!(m_mapLoaded = parseObjectgroup(currentNode)))
+			if(!(m_mapLoaded = ParseObjectgroup(currentNode)))
 			{
-				unload();
+				Unload();
 				return false;
 			}
 		}
 		currentNode = currentNode.next_sibling();
 	}
 
-	createDebugGrid();
+	CreateDebugGrid();
 
 	LOG("Parsed " + std::to_string(m_layers.size()) + " layers.", Logger::Type::Info);
 	LOG("Loaded tmx file successfully.", Logger::Type::Info);
 
-    m_cachedImages.clear(); //these should all be loaded into textures now
+	m_cachedImages.clear(); //these should all be loaded into textures now
 	return m_mapLoaded = true;
 }
 
-void MapLoader::unload()
+void MapLoader::Unload()
 {
 	m_tilesetTextures.clear();
 	m_tileInfo.clear();
 	m_layers.clear();
 	m_imageLayerTextures.clear();
-    m_cachedImages.clear();
+	m_cachedImages.clear();
+	m_properties.clear();
 	m_mapLoaded = false;
 	m_quadTreeAvailable = false;
 	m_failedImage = false;
+	m_lastViewPos = sf::Vector2f(-0.1f, -0.1f);
 }
 
-void MapLoader::setDrawingBounds(const sf::View& view)
+void MapLoader::SetDrawingBounds(const sf::View& view)
 {
 	if(view.getCenter() != m_lastViewPos)
 	{
@@ -143,12 +152,12 @@ void MapLoader::setDrawingBounds(const sf::View& view)
 		m_bounds = bounds;
 
 		for(auto& layer : m_layers)
-			layer.cull(m_bounds);
+			layer.Cull(m_bounds);
 	}
 	m_lastViewPos = view.getCenter();
 }
 
-bool MapLoader::parseMapNode(const pugi::xml_node& mapNode)
+bool MapLoader::ParseMapNode(const pugi::xml_node& mapNode)
 {
 	//parse tile properties
 	if(!(m_width = mapNode.attribute("width").as_int()) ||
@@ -195,7 +204,7 @@ bool MapLoader::parseMapNode(const pugi::xml_node& mapNode)
 	return true;
 }
 
-bool MapLoader::parseTileSets(const pugi::xml_node& mapNode)
+bool MapLoader::ParseTileSets(const pugi::xml_node& mapNode)
 {
 	pugi::xml_node tileset;
 	if(!(tileset = mapNode.child("tileset")))
@@ -206,7 +215,7 @@ bool MapLoader::parseTileSets(const pugi::xml_node& mapNode)
 	LOG("Caching image files, please wait...",Logger::Type::Info);
 
 	//empty vertex tile
-    m_tileInfo.emplace_back();
+	m_tileInfo.emplace_back();
 
 	//parse tile sets in order so GIDs match index
 	while(tileset)
@@ -215,7 +224,7 @@ bool MapLoader::parseTileSets(const pugi::xml_node& mapNode)
 		if(tileset.attribute("source"))
 		{
 			//try loading tsx
-			std::string file = fileFromPath(tileset.attribute("source").as_string());
+			std::string file = FileFromPath(tileset.attribute("source").as_string());
 			std::string path;
 			pugi::xml_document tsxDoc;
 			pugi::xml_parse_result result;
@@ -231,18 +240,18 @@ bool MapLoader::parseTileSets(const pugi::xml_node& mapNode)
 				LOG("Failed to open external tsx document: " + path, Logger::Type::Error);
 				LOG("Reason: " + std::string(result.description()), Logger::Type::Error);
 				LOG("Make sure to add any external paths with AddSearchPath()", Logger::Type::Error);
-				unload(); //purge any partially loaded data
+				Unload(); //purge any partially loaded data
 				return false;
 			}
 			
 			//try parsing tileset node
 			pugi::xml_node ts = tsxDoc.child("tileset");
 
-			if(!processTiles(ts)) return false;
+			if(!ProcessTiles(ts)) return false;
 		}
 		else //try for tmx map file data
 		{
-			if(!processTiles(tileset)) return false;
+			if(!ProcessTiles(tileset)) return false;
 		}
 
 		//move on to next tileset node
@@ -252,7 +261,7 @@ bool MapLoader::parseTileSets(const pugi::xml_node& mapNode)
 	return true;
 }
 
-bool MapLoader::processTiles(const pugi::xml_node& tilesetNode)
+bool MapLoader::ProcessTiles(const pugi::xml_node& tilesetNode)
 {
 	sf::Uint16 tileWidth, tileHeight, spacing, margin;
 
@@ -261,7 +270,7 @@ bool MapLoader::processTiles(const pugi::xml_node& tilesetNode)
 		!(tileHeight = tilesetNode.attribute("tileheight").as_int()))
 	{
 		LOG("Invalid tileset data found. Map not loaded.", Logger::Type::Error);
-		unload();
+		Unload();
 		return false;
 	}
 	spacing = (tilesetNode.attribute("spacing")) ? tilesetNode.attribute("spacing").as_int() : 0u;
@@ -272,15 +281,15 @@ bool MapLoader::processTiles(const pugi::xml_node& tilesetNode)
 	if(!(imageNode = tilesetNode.child("image")) || !imageNode.attribute("source"))
 	{
 		//we have a tileset of images
-        return parseCollectionOfImages(tilesetNode);
-        //LOG("Missing image data in tmx file. Map not loaded.", Logger::Type::Error);
+		return ParseCollectionOfImages(tilesetNode);
+		//LOG("Missing image data in tmx file. Map not loaded.", Logger::Type::Error);
 		//Unload();
 		//return false;
 	}
 
 	//process image from disk
-	std::string imageName = fileFromPath(imageNode.attribute("source").as_string());
-	sf::Image sourceImage = loadImage(imageName);
+	std::string imageName = FileFromPath(imageNode.attribute("source").as_string());
+	sf::Image sourceImage = LoadImage(imageName);
 	if(m_failedImage)
 	{
 		LOG("Failed to load image " + imageName, Logger::Type::Error);
@@ -290,12 +299,12 @@ bool MapLoader::processTiles(const pugi::xml_node& tilesetNode)
 
 	//add transparency mask from colour if it exists
 	if(imageNode.attribute("trans"))
-		sourceImage.createMaskFromColor(colourFromHex(imageNode.attribute("trans").as_string()));
+		sourceImage.createMaskFromColor(ColourFromHex(imageNode.attribute("trans").as_string()));
 
-    //store image as a texture for drawing with vertex array
-    std::unique_ptr<sf::Texture> tileset(new sf::Texture);
-    tileset->loadFromImage(sourceImage);
-    m_tilesetTextures.push_back(std::move(tileset));
+	//store image as a texture for drawing with vertex array
+	std::unique_ptr<sf::Texture> tileset(new sf::Texture);
+	tileset->loadFromImage(sourceImage);
+	m_tilesetTextures.push_back(std::move(tileset));
 
 	//parse offset node if it exists - TODO store somewhere tileset info can be referenced
 	sf::Vector2u offset;
@@ -334,62 +343,62 @@ bool MapLoader::processTiles(const pugi::xml_node& tilesetNode)
 	return true;
 }
 
-bool MapLoader::parseCollectionOfImages(const pugi::xml_node& tilesetNode)
+bool MapLoader::ParseCollectionOfImages(const pugi::xml_node& tilesetNode)
 {
-    if (pugi::xml_node tile = tilesetNode.child("tile"))
-    {
-        while (tile)
-        {
-            for (const auto& c : tile.children()) //ok so I only just found pugi supports this
-            {
-                if (std::string(c.name()) == "image")
-                {
-                    std::string imageName = fileFromPath(c.attribute("source").as_string());
-                    sf::Image sourceImage = loadImage(imageName);
-                    if (m_failedImage)
-                    {
-                        LOG("Failed to load image " + imageName, Logger::Type::Error);
-                        LOG("Please check image exists and add any external paths with AddSearchPath()", Logger::Type::Warning);
-                        return false;
-                    }
+	pugi::xml_node tile;
+	if (tile = tilesetNode.child("tile"))
+	{
+		while (tile)
+		{
+			for (const auto& c : tile.children()) //ok so I only just found pugi supports this
+			{
+				if (std::string(c.name()) == "image")
+				{
+					std::string imageName = FileFromPath(c.attribute("source").as_string());
+					sf::Image sourceImage = LoadImage(imageName);
+					if (m_failedImage)
+					{
+						LOG("Failed to load image " + imageName, Logger::Type::Error);
+						LOG("Please check image exists and add any external paths with AddSearchPath()", Logger::Type::Warning);
+						return false;
+					}
 
-                    //add transparency mask from colour if it exists (not current in COI sets, but it may get added)
-                    if (c.attribute("trans"))
-                        sourceImage.createMaskFromColor(colourFromHex(c.attribute("trans").as_string()));
+					//add transparency mask from colour if it exists (not current in COI sets, but it may get added)
+					if (c.attribute("trans"))
+						sourceImage.createMaskFromColor(ColourFromHex(c.attribute("trans").as_string()));
 
-                    //store image as a texture for drawing with vertex array
-                    std::unique_ptr<sf::Texture> tileset(new sf::Texture);
-                    tileset->loadFromImage(sourceImage);
-                    m_tilesetTextures.push_back(std::move(tileset));
+					//store image as a texture for drawing with vertex array
+					std::unique_ptr<sf::Texture> tileset(new sf::Texture);
+					tileset->loadFromImage(sourceImage);
+					m_tilesetTextures.push_back(std::move(tileset));
 
-                    sf::Uint16 width = c.attribute("width").as_uint();
-                    sf::Uint16 height = c.attribute("height").as_uint();
+					sf::Uint16 width = c.attribute("width").as_uint();
+					sf::Uint16 height = c.attribute("height").as_uint();
 
-                    sf::IntRect rect;
-                    rect.height = height;
-                    rect.width = width;
+					sf::IntRect rect;
+					rect.height = height;
+					rect.width = width;
 
-                    //store texture coords and tileset index for vertex array
-                    //TODO this assumes tile IDs are contiguous - they aren't always!
-                    m_tileInfo.push_back(TileInfo(rect,
-                        sf::Vector2f(static_cast<float>(rect.width), static_cast<float>(rect.height)),
-                        m_tilesetTextures.size() - 1u));
+					//store texture coords and tileset index for vertex array
+					m_tileInfo.push_back(TileInfo(rect,
+						sf::Vector2f(static_cast<float>(rect.width), static_cast<float>(rect.height)),
+						m_tilesetTextures.size() - 1u));
 
-                    LOG("Processed " + imageName, Logger::Type::Info);
-                }
-                else if (std::string(c.name()) == "property")
-                {
-                    //need to implement this when implementing with single tilesets above
-                }
-            }
-            tile = tile.next_sibling();
-        }
-    }
+					LOG("Processed " + imageName, Logger::Type::Info);
+				}
+				else if (std::string(c.name()) == "property")
+				{
+					//need to implement this when implementing with single tilesets above
+				}
+			}
+			tile = tile.next_sibling();
+		}
+	}
 
-    return true;
+	return true;
 }
 
-bool MapLoader::parseLayer(const pugi::xml_node& layerNode)
+bool MapLoader::ParseLayer(const pugi::xml_node& layerNode)
 {
 	LOG("Found standard map layer " + std::string(layerNode.attribute("name").as_string()), Logger::Type::Info);
 
@@ -433,7 +442,7 @@ bool MapLoader::parseLayer(const pugi::xml_node& layerNode)
 
 				//decompress with zlib
 				int dataSize = data.length() * sizeof(unsigned char);
-				if(!decompress(data.c_str(), byteArray, dataSize, expectedSize))
+				if(!Decompress(data.c_str(), byteArray, dataSize, expectedSize))
 				{
 					LOG("Failed to decompress map data. Map not loaded.", Logger::Type::Error);
 					return false;
@@ -449,11 +458,11 @@ bool MapLoader::parseLayer(const pugi::xml_node& layerNode)
 			x = y = 0;
 			for(int i = 0; i < expectedSize - 3; i +=4)
 			{
-                sf::Uint32 tileGID = byteArray[i] | byteArray[i + 1] << 8 | byteArray[i + 2] << 16 | byteArray[i + 3] << 24;
+				sf::Uint32 tileGID = byteArray[i] | byteArray[i + 1] << 8 | byteArray[i + 2] << 16 | byteArray[i + 3] << 24;
 //                sf::Uint32 tileGID = resolveRotation(&byteArray[i]);
 
 
-				addTileToLayer(layer, x, y, tileGID);
+				AddTileToLayer(layer, x, y, tileGID);
 
 				x++;
 				if(x == m_width)
@@ -467,15 +476,15 @@ bool MapLoader::parseLayer(const pugi::xml_node& layerNode)
 		{
 			LOG("CSV encoded layer data found.", Logger::Type::Info);
 
-            std::vector<sf::Uint32> tileGIDs;
+			std::vector<sf::Uint32> tileGIDs;
 			std::stringstream datastream(data);
 
 			//parse csv string into vector of IDs
-            sf::Uint32 i;
+			sf::Uint32 i;
 			while (datastream >> i)
 			{
 
-                tileGIDs.push_back(i);
+				tileGIDs.push_back(i);
 				if(datastream.peek() == ',')
 					datastream.ignore();
 			}
@@ -486,7 +495,7 @@ bool MapLoader::parseLayer(const pugi::xml_node& layerNode)
 			for(unsigned int i = 0; i < tileGIDs.size(); i++)
 			{
 //                sf::Uint32 gid=resolveRotation(tileGIDs[i]);
-                addTileToLayer(layer, x, y, tileGIDs[i]);
+				AddTileToLayer(layer, x, y, tileGIDs[i]);
 				x++;
 				if(x == m_width)
 				{
@@ -515,12 +524,12 @@ bool MapLoader::parseLayer(const pugi::xml_node& layerNode)
 		x = y = 0;
 		while(tileNode)
 		{
-            sf::Uint32 gid = tileNode.attribute("gid").as_uint();
+			sf::Uint32 gid = tileNode.attribute("gid").as_uint();
 
 //            gid=resolveRotation(gid);
 
 
-			addTileToLayer(layer, x, y, gid);
+			AddTileToLayer(layer, x, y, gid);
 
 			tileNode = tileNode.next_sibling("tile");
 			x++;
@@ -534,149 +543,149 @@ bool MapLoader::parseLayer(const pugi::xml_node& layerNode)
 
 	//parse any layer properties
 	if(pugi::xml_node propertiesNode = layerNode.child("properties"))
-		parseLayerProperties(propertiesNode, layer);
+		ParseLayerProperties(propertiesNode, layer);
 
 	//convert layer tile coords to isometric if needed
-	if(m_orientation == MapOrientation::Isometric) setIsometricCoords(layer);
+	if(m_orientation == MapOrientation::Isometric) SetIsometricCoords(layer);
 
 	m_layers.push_back(layer);
 	return true;
 }
 
-std::vector<unsigned char> MapLoader::intToBytes(sf::Uint32 paramInt)
+std::vector<unsigned char> MapLoader::IntToBytes(sf::Uint32 paramInt)
 {
-     std::vector<unsigned char> arrayOfByte(4);
-     for (int i = 0; i < 4; i++)
-         arrayOfByte[i] = (paramInt >> (i * 8));
-     return arrayOfByte;
+	 std::vector<unsigned char> arrayOfByte(4);
+	 for (int i = 0; i < 4; i++)
+		 arrayOfByte[i] = (paramInt >> (i * 8));
+	 return arrayOfByte;
 }
 
-std::pair<sf::Uint32, std::bitset<3> > MapLoader::resolveRotation(sf::Uint32 gid)
+std::pair<sf::Uint32, std::bitset<3> > MapLoader::ResolveRotation(sf::Uint32 gid)
 {
-    const unsigned FLIPPED_HORIZONTALLY_FLAG = 0x80000000;
-    const unsigned FLIPPED_VERTICALLY_FLAG   = 0x40000000;
-    const unsigned FLIPPED_DIAGONALLY_FLAG   = 0x20000000;
+	const unsigned FLIPPED_HORIZONTALLY_FLAG = 0x80000000;
+	const unsigned FLIPPED_VERTICALLY_FLAG   = 0x40000000;
+	const unsigned FLIPPED_DIAGONALLY_FLAG   = 0x20000000;
 
-    std::vector<unsigned char> bytes = intToBytes(gid);
-    sf::Uint32 tileGID = bytes[0] | bytes[1] << 8 | bytes[2] << 16 | bytes[3] << 24;
+	std::vector<unsigned char> bytes = IntToBytes(gid);
+	sf::Uint32 tileGID = bytes[0] | bytes[1] << 8 | bytes[2] << 16 | bytes[3] << 24;
 
-    bool flipped_diagonally = (tileGID & FLIPPED_DIAGONALLY_FLAG);
-    bool flipped_horizontally = (tileGID & FLIPPED_HORIZONTALLY_FLAG);
-    bool flipped_vertically = (tileGID & FLIPPED_VERTICALLY_FLAG);
+	bool flipped_diagonally = !!(tileGID & FLIPPED_DIAGONALLY_FLAG);
+	bool flipped_horizontally = !!(tileGID & FLIPPED_HORIZONTALLY_FLAG);
+	bool flipped_vertically = !!(tileGID & FLIPPED_VERTICALLY_FLAG);
 
-    std::bitset<3> b;
-    b.set(0,flipped_vertically);
-    b.set(1,flipped_horizontally);
-    b.set(2,flipped_diagonally);
+	std::bitset<3> b;
+	b.set(0,flipped_vertically);
+	b.set(1,flipped_horizontally);
+	b.set(2,flipped_diagonally);
 
-    tileGID &= ~(FLIPPED_HORIZONTALLY_FLAG |
-                            FLIPPED_VERTICALLY_FLAG |
-                            FLIPPED_DIAGONALLY_FLAG);
-    return std::pair<sf::Uint32, std::bitset<3> >(tileGID,b);
+	tileGID &= ~(FLIPPED_HORIZONTALLY_FLAG |
+							FLIPPED_VERTICALLY_FLAG |
+							FLIPPED_DIAGONALLY_FLAG);
+	return std::pair<sf::Uint32, std::bitset<3> >(tileGID,b);
 }
 
-void MapLoader::flipY(sf::Vector2f *v0, sf::Vector2f *v1, sf::Vector2f *v2, sf::Vector2f *v3)
+void MapLoader::FlipY(sf::Vector2f *v0, sf::Vector2f *v1, sf::Vector2f *v2, sf::Vector2f *v3)
 {
-    //Flip Y
-    sf::Vector2f tmp = *v0;
-    v0->y = v2->y;
-    v1->y = v2->y;
-    v2->y = tmp.y ;
-    v3->y = v2->y  ;
+	//Flip Y
+	sf::Vector2f tmp = *v0;
+	v0->y = v2->y;
+	v1->y = v2->y;
+	v2->y = tmp.y ;
+	v3->y = v2->y  ;
 }
 
-void MapLoader::flipX(sf::Vector2f *v0, sf::Vector2f *v1, sf::Vector2f *v2, sf::Vector2f *v3)
+void MapLoader::FlipX(sf::Vector2f *v0, sf::Vector2f *v1, sf::Vector2f *v2, sf::Vector2f *v3)
 {
-    //Flip X
-    sf::Vector2f tmp = *v0;
-    v0->x = v1->x;
-    v1->x = tmp.x;
-    v2->x = v3->x;
-    v3->x = v0->x ;
+	//Flip X
+	sf::Vector2f tmp = *v0;
+	v0->x = v1->x;
+	v1->x = tmp.x;
+	v2->x = v3->x;
+	v3->x = v0->x ;
 }
 
-void MapLoader::flipD(sf::Vector2f *v0, sf::Vector2f *v1, sf::Vector2f *v2, sf::Vector2f *v3)
+void MapLoader::FlipD(sf::Vector2f *v0, sf::Vector2f *v1, sf::Vector2f *v2, sf::Vector2f *v3)
 {
-    //Diagonal flip
-    sf::Vector2f tmp = *v1;
-    v1->x = v3->x;
-    v1->y = v3->y;
-    v3->x = tmp.x;
-    v3->y = tmp.y;
+	//Diagonal flip
+	sf::Vector2f tmp = *v1;
+	v1->x = v3->x;
+	v1->y = v3->y;
+	v3->x = tmp.x;
+	v3->y = tmp.y;
 }
 
-void MapLoader::doFlips(std::bitset<3> bits, sf::Vector2f *v0, sf::Vector2f *v1, sf::Vector2f *v2, sf::Vector2f *v3)
+void MapLoader::DoFlips(std::bitset<3> bits, sf::Vector2f *v0, sf::Vector2f *v1, sf::Vector2f *v2, sf::Vector2f *v3)
 {
-    //000 = no change
-    //001 = vertical = swap y axis
-    //010 = horizontal = swap x axis
-    //011 = horiz + vert = swap both axes = horiz+vert = rotate 180 degrees
-    //100 = diag = rotate 90 degrees right and swap x axis
-    //101 = diag+vert = rotate 270 degrees right
-    //110 = horiz+diag = rotate 90 degrees right
-    //111 = horiz+vert+diag = rotate 90 degrees right and swap y axis
+	//000 = no change
+	//001 = vertical = swap y axis
+	//010 = horizontal = swap x axis
+	//011 = horiz + vert = swap both axes = horiz+vert = rotate 180 degrees
+	//100 = diag = rotate 90 degrees right and swap x axis
+	//101 = diag+vert = rotate 270 degrees right
+	//110 = horiz+diag = rotate 90 degrees right
+	//111 = horiz+vert+diag = rotate 90 degrees right and swap y axis
 
-    if(!bits.test(0) && !bits.test(1) && !bits.test(2))
-    {
-        //Shortcircuit tests for nothing to do
-        return;
-    }
-    else if(bits.test(0) && !bits.test(1) && !bits.test(2))
-    {
-        //001
-        flipY(v0,v1,v2,v3);
-    }
-    else if(!bits.test(0) && bits.test(1) && !bits.test(2))
-    {
-        //010
-        flipX(v0,v1,v2,v3);
-    }
-    else if(bits.test(0) && bits.test(1) && !bits.test(2))
-    {
-        //011
-        flipY(v0,v1,v2,v3);
-        flipX(v0,v1,v2,v3);
-    }
-    else if(!bits.test(0) && !bits.test(1) && bits.test(2))
-    {
-        //100
-        flipD(v0,v1,v2,v3);
-    }
-    else if(bits.test(0) && !bits.test(1) && bits.test(2))
-    {
-        //101
-        flipX(v0,v1,v2,v3);
-        flipD(v0,v1,v2,v3);
+	if(!bits.test(0) && !bits.test(1) && !bits.test(2))
+	{
+		//Shortcircuit tests for nothing to do
+		return;
+	}
+	else if(bits.test(0) && !bits.test(1) && !bits.test(2))
+	{
+		//001
+		FlipY(v0,v1,v2,v3);
+	}
+	else if(!bits.test(0) && bits.test(1) && !bits.test(2))
+	{
+		//010
+		FlipX(v0,v1,v2,v3);
+	}
+	else if(bits.test(0) && bits.test(1) && !bits.test(2))
+	{
+		//011
+		FlipY(v0,v1,v2,v3);
+		FlipX(v0,v1,v2,v3);
+	}
+	else if(!bits.test(0) && !bits.test(1) && bits.test(2))
+	{
+		//100
+		FlipD(v0,v1,v2,v3);
+	}
+	else if(bits.test(0) && !bits.test(1) && bits.test(2))
+	{
+		//101
+		FlipX(v0,v1,v2,v3);
+		FlipD(v0,v1,v2,v3);
 
 
-    }
-    else if(!bits.test(0) && bits.test(1) && bits.test(2))
-    {
-        //110
-        flipY(v0,v1,v2,v3);
-        flipD(v0,v1,v2,v3);
+	}
+	else if(!bits.test(0) && bits.test(1) && bits.test(2))
+	{
+		//110
+		FlipY(v0,v1,v2,v3);
+		FlipD(v0,v1,v2,v3);
 
-    }
-    else if(bits.test(0) && bits.test(1) && bits.test(2))
-    {
-        //111
-        flipY(v0,v1,v2,v3);
-        flipX(v0,v1,v2,v3);
-        flipD(v0,v1,v2,v3);
-    }
+	}
+	else if(bits.test(0) && bits.test(1) && bits.test(2))
+	{
+		//111
+		FlipY(v0,v1,v2,v3);
+		FlipX(v0,v1,v2,v3);
+		FlipD(v0,v1,v2,v3);
+	}
 }
 
-TileQuad* MapLoader::addTileToLayer(MapLayer& layer, sf::Uint16 x, sf::Uint16 y, sf::Uint32 gid, const sf::Vector2f& offset)
+TileQuad* tmx::MapLoader::AddTileToLayer(MapLayer& layer, sf::Uint16 x, sf::Uint16 y, sf::Uint32 gid, const sf::Vector2f& offset /*= sf::Vector2f()*/, const float rotationAmount /*= 0.f*/, const sf::Vector2f &scaleSize /*= sf::Vector2f(0, 0)*/)
 {
 	sf::Uint8 opacity = static_cast<sf::Uint8>(255.f * layer.opacity);
 	sf::Color colour = sf::Color(255u, 255u, 255u, opacity);
 
-    //Get bits and tile id
-    std::pair<sf::Uint32, std::bitset<3> > idAndFlags = resolveRotation(gid);
-    gid = idAndFlags.first;
+	//Get bits and tile id
+	std::pair<sf::Uint32, std::bitset<3> > idAndFlags = ResolveRotation(gid);
+	gid = idAndFlags.first;
 
 	//update the layer's tile set(s)
-    sf::Vertex v0, v1, v2, v3;
+	sf::Vertex v0, v1, v2, v3;
 
 	//applying half pixel trick avoids artifacting when scrolling
 	v0.texCoords = m_tileInfo[gid].Coords[0] + sf::Vector2f(0.5f, 0.5f);
@@ -684,16 +693,26 @@ TileQuad* MapLoader::addTileToLayer(MapLayer& layer, sf::Uint16 x, sf::Uint16 y,
 	v2.texCoords = m_tileInfo[gid].Coords[2] + sf::Vector2f(-0.5f, -0.5f);
 	v3.texCoords = m_tileInfo[gid].Coords[3] + sf::Vector2f(0.5f, -0.5f);
 
-    //flip texture coordinates according to bits set
-    doFlips(idAndFlags.second,&v0.texCoords,&v1.texCoords,&v2.texCoords,&v3.texCoords);
+	//flip texture coordinates according to bits set
+	DoFlips(idAndFlags.second,&v0.texCoords,&v1.texCoords,&v2.texCoords,&v3.texCoords);
 
-	v0.position = sf::Vector2f(static_cast<float>(m_tileWidth * x), static_cast<float>(m_tileHeight * y));
-	v1.position = sf::Vector2f(static_cast<float>(m_tileWidth * x) + m_tileInfo[gid].Size.x, static_cast<float>(m_tileHeight * y));
-	v2.position = sf::Vector2f(static_cast<float>(m_tileWidth * x) + m_tileInfo[gid].Size.x, static_cast<float>(m_tileHeight * y) + m_tileInfo[gid].Size.y);
-	v3.position = sf::Vector2f(static_cast<float>(m_tileWidth * x), static_cast<float>(m_tileHeight * y) + m_tileInfo[gid].Size.y);
+	if(scaleSize.x == 0 || scaleSize.y == 0)
+	{
+		v0.position = sf::Vector2f(static_cast<float>(m_tileWidth * x), static_cast<float>(m_tileHeight * y));
+		v1.position = sf::Vector2f(static_cast<float>(m_tileWidth * x) + m_tileInfo[gid].Size.x, static_cast<float>(m_tileHeight * y));
+		v2.position = sf::Vector2f(static_cast<float>(m_tileWidth * x) + m_tileInfo[gid].Size.x, static_cast<float>(m_tileHeight * y) + m_tileInfo[gid].Size.y);
+		v3.position = sf::Vector2f(static_cast<float>(m_tileWidth * x), static_cast<float>(m_tileHeight * y) + m_tileInfo[gid].Size.y);
+	}
+	else
+	{
+		v0.position = sf::Vector2f(static_cast<float>(m_tileWidth * x), static_cast<float>(m_tileHeight * y));
+		v1.position = sf::Vector2f(static_cast<float>(m_tileWidth * x) + scaleSize.x, static_cast<float>(m_tileHeight * y));
+		v2.position = sf::Vector2f(static_cast<float>(m_tileWidth * x) + scaleSize.x, static_cast<float>(m_tileHeight * y) + scaleSize.y);
+		v3.position = sf::Vector2f(static_cast<float>(m_tileWidth * x), static_cast<float>(m_tileHeight * y) + scaleSize.y);
+	}
 
 	//offset tiles with size not equal to map grid size
-	sf::Uint16 tileHeight = static_cast<sf::Uint16>(m_tileInfo[gid].Size.y);
+	sf::Uint16 tileHeight = static_cast<sf::Uint16>((scaleSize.y == 0) ? m_tileInfo[gid].Size.y : scaleSize.y);
 	if(tileHeight != m_tileHeight)
 	{
 		float diff = static_cast<float>(m_tileHeight - tileHeight);
@@ -728,6 +747,20 @@ TileQuad* MapLoader::addTileToLayer(MapLayer& layer, sf::Uint16 x, sf::Uint16 y,
 	v2.position += offset;
 	v3.position += offset;
 
+	// Perform rotation here
+	sf::Vector2f centerPoint = v3.position;
+	//sf::Vector2f centerPoint = (v0.position + v2.position) * 0.5f;
+	//centerPoint.x *= 0.5f;
+	//centerPoint.y *= 0.5f;
+	
+	sf::Transform R;
+	R.rotate(rotationAmount, centerPoint);
+	
+	v0.position = R.transformPoint(v0.position);
+	v1.position = R.transformPoint(v1.position);
+	v2.position = R.transformPoint(v2.position);
+	v3.position = R.transformPoint(v3.position);
+
 	sf::Uint16 id = m_tileInfo[gid].TileSetId;
 	if(layer.layerSets.find(id) == layer.layerSets.end())
 	{
@@ -736,10 +769,10 @@ TileQuad* MapLoader::addTileToLayer(MapLayer& layer, sf::Uint16 x, sf::Uint16 y,
 	}
 
 	//add tile to set
-	return layer.layerSets[id]->addTile(v0, v1, v2, v3, x, y);
+	return layer.layerSets[id]->AddTile(v0, v1, v2, v3, x, y);
 }
 
-bool MapLoader::parseObjectgroup(const pugi::xml_node& groupNode)
+bool MapLoader::ParseObjectgroup(const pugi::xml_node& groupNode)
 {
 	LOG("Found object layer " + std::string(groupNode.attribute("name").as_string()), Logger::Type::Info);
 
@@ -756,7 +789,7 @@ bool MapLoader::parseObjectgroup(const pugi::xml_node& groupNode)
 	layer.name = groupNode.attribute("name").as_string();
 	if(groupNode.attribute("opacity")) layer.opacity = groupNode.attribute("opacity").as_float();
 	if(pugi::xml_node propertiesNode = groupNode.child("properties"))
-		parseLayerProperties(propertiesNode, layer);
+		ParseLayerProperties(propertiesNode, layer);
 	//NOTE we push the layer onto the vector at the end of the function in case we add any objects
 	//with tile data to the layer's tiles property
 
@@ -766,7 +799,7 @@ bool MapLoader::parseObjectgroup(const pugi::xml_node& groupNode)
 		if(!objectNode.attribute("x") || !objectNode.attribute("y"))
 		{
 			LOG("Object missing position data. Map not loaded.", Logger::Type::Error);
-			unload();
+			Unload();
 			return false;
 		}
 		MapObject object;
@@ -774,10 +807,10 @@ bool MapLoader::parseObjectgroup(const pugi::xml_node& groupNode)
 		//set position
 		sf::Vector2f position(objectNode.attribute("x").as_float(),
 											objectNode.attribute("y").as_float());
-		position = isometricToOrthogonal(position);
-		object.setPosition(position);
+		position = IsometricToOrthogonal(position);
+		object.SetPosition(position);
 
-        //set size if specified
+		//set size if specified
 		if(objectNode.attribute("width") && objectNode.attribute("height"))
 		{
 			sf::Vector2f size(objectNode.attribute("width").as_float(),
@@ -792,37 +825,37 @@ bool MapLoader::parseObjectgroup(const pugi::xml_node& groupNode)
 				for(float angle = 0.f; angle < tau; angle += step)
 				{
 					sf::Vector2f point(x + x * cos(angle), y + y * sin(angle));
-					object.addPoint(isometricToOrthogonal(point));
+					object.AddPoint(IsometricToOrthogonal(point));
 				}
 
-				if (size.x == size.y) object.setShapeType(Circle);
-				else object.setShapeType(Ellipse);
+				if (size.x == size.y) object.SetShapeType(Circle);
+				else object.SetShapeType(Ellipse);
 			}
 			else //add points for rectangle to use in intersection testing
 			{
-				object.addPoint(isometricToOrthogonal(sf::Vector2f()));
-				object.addPoint(isometricToOrthogonal(sf::Vector2f(size.x, 0.f)));
-				object.addPoint(isometricToOrthogonal(sf::Vector2f(size.x, size.y)));
-				object.addPoint(isometricToOrthogonal(sf::Vector2f(0.f, size.y)));
+				object.AddPoint(IsometricToOrthogonal(sf::Vector2f()));
+				object.AddPoint(IsometricToOrthogonal(sf::Vector2f(size.x, 0.f)));
+				object.AddPoint(IsometricToOrthogonal(sf::Vector2f(size.x, size.y)));
+				object.AddPoint(IsometricToOrthogonal(sf::Vector2f(0.f, size.y)));
 			}
-			object.setSize(size);
+			object.SetSize(size);
 		}
 		//else parse poly points
-        else if (objectNode.find_child(FindByName("polygon")) || objectNode.find_child(FindByName("polyline")))
-                {
-            pugi::xml_node child;
-            if ((child = objectNode.find_child(FindByName("polygon"))))
-            {
-                object.setShapeType(Polygon);
-            }
-            else
-            {
-                object.setShapeType(Polyline);
-                child = objectNode.find_child(FindByName("polyline"));
-            }
+		else if (objectNode.find_child(FindByName("polygon")) || objectNode.find_child(FindByName("polyline")))
+		{
+			pugi::xml_node child;
+			if (child = objectNode.find_child(FindByName("polygon")))
+			{
+				object.SetShapeType(Polygon);
+			}
+			else
+			{
+				object.SetShapeType(Polyline);
+				child = objectNode.find_child(FindByName("polyline"));
+			}
 
 			//split coords into pairs
-            if (child.attribute("points"))
+			if (child.attribute("points"))
 			{
 				LOG("Processing poly shape points...", Logger::Type::Info);
 				std::string pointlist = child.attribute("points").as_string();
@@ -845,7 +878,7 @@ bool MapLoader::parseObjectgroup(const pugi::xml_node& groupNode)
 						if(coordstream.peek() == ',')
 							coordstream.ignore();
 					}
-					object.addPoint(isometricToOrthogonal(sf::Vector2f(coords[0], coords[1])));
+					object.AddPoint(IsometricToOrthogonal(sf::Vector2f(coords[0], coords[1])));
 				}
 			}
 			else
@@ -868,7 +901,7 @@ bool MapLoader::parseObjectgroup(const pugi::xml_node& groupNode)
 			{
 				std::string name = propertyNode.attribute("name").as_string();
 				std::string value = propertyNode.attribute("value").as_string();
-				object.setProperty(name, value);
+				object.SetProperty(name, value);
 
 				LOG("Set object property " + name + " with value " + value, Logger::Type::Info);
 				propertyNode = propertyNode.next_sibling("property");
@@ -876,36 +909,43 @@ bool MapLoader::parseObjectgroup(const pugi::xml_node& groupNode)
 		}
 
 		//set object properties
-		if(objectNode.attribute("name")) object.setName(objectNode.attribute("name").as_string());
-		if(objectNode.attribute("type")) object.setType(objectNode.attribute("type").as_string());
-        if(objectNode.attribute("rotation")) object.setRotation(objectNode.attribute("rotation").as_float());
-		if(objectNode.attribute("visible")) object.setVisible(objectNode.attribute("visible").as_bool());
+		if(objectNode.attribute("name")) object.SetName(objectNode.attribute("name").as_string());
+		if(objectNode.attribute("type")) object.SetType(objectNode.attribute("type").as_string());
+		if(objectNode.attribute("rotation")) object.SetRotation(objectNode.attribute("rotation").as_float()); //{} //TODO handle rotation attribute
+		if(objectNode.attribute("visible")) object.SetVisible(objectNode.attribute("visible").as_bool());
 		if(objectNode.attribute("gid"))
 		{		
-			sf::Uint32 gid = objectNode.attribute("gid").as_int();
+			sf::Uint32 gid = objectNode.attribute("gid").as_uint();
 
-			LOG("Found object with tile GID " + gid, Logger::Type::Info);
-
-			object.move(0.f, static_cast<float>(-m_tileHeight)); //offset for tile origins being at the bottom in Tiled
-			const sf::Uint16 x = static_cast<sf::Uint16>(object.getPosition().x / m_tileWidth);
-			const sf::Uint16 y = static_cast<sf::Uint16>(object.getPosition().y / m_tileHeight);
+			LOG("Found object with tile GID " + std::to_string(gid), Logger::Type::Info);
 			
-			sf::Vector2f offset(object.getPosition().x - (x * m_tileWidth), (object.getPosition().y - (y * m_tileHeight)));
-			object.setQuad(addTileToLayer(layer, x, y, gid, offset));
-			object.setShapeType(Tile);
+			object.Move(0.f, static_cast<float>(-m_tileHeight)); //offset for tile origins being at the bottom in Tiled
+			const sf::Uint16 x = static_cast<sf::Uint16>(object.GetPosition().x / m_tileWidth);
+			const sf::Uint16 y = static_cast<sf::Uint16>(object.GetPosition().y / m_tileHeight);
+			
+			sf::Vector2f offset(object.GetPosition().x - (x * m_tileWidth), (object.GetPosition().y - (y * m_tileHeight)));
+			object.SetQuad(AddTileToLayer(layer, x, y, gid, offset, object.GetRotation(), object.GetSize()));
+			object.SetShapeType(Tile);
 
-			TileInfo info = m_tileInfo[gid];
+			auto realID = ResolveRotation(gid);
+			gid = realID.first;
+
+			//TileInfo info = m_tileInfo[gid];
 			//create bounding poly
-			float width = static_cast<float>(info.Size.x);
-			float height = static_cast<float>(info.Size.y);
+			//float width = static_cast<float>(info.Size.x);
+			//float height = static_cast<float>(info.Size.y);
+			//
+			//object.AddPoint(sf::Vector2f());
+			//object.AddPoint(sf::Vector2f(width, 0.f));
+			//object.AddPoint(sf::Vector2f(width, height));
+			//object.AddPoint(sf::Vector2f(0.f, height));
+			//object.SetSize(sf::Vector2f(width, height));
 
-			object.addPoint(sf::Vector2f());
-			object.addPoint(sf::Vector2f(width, 0.f));
-			object.addPoint(sf::Vector2f(width, height));
-			object.addPoint(sf::Vector2f(0.f, height));
-			object.setSize(sf::Vector2f(width, height));
+			//move object if tile not map tile size
+			//if(info.Size.y != m_tileHeight)
+			//	object.Move(0.f, static_cast<float>(m_tileHeight - info.Size.y) / 2.f);
 		}
-		object.setParent(layer.name);
+		object.SetParent(layer.name);
 
 		//call objects create debug shape function with colour / opacity
 		sf::Color debugColour;
@@ -915,14 +955,14 @@ bool MapLoader::parseObjectgroup(const pugi::xml_node& groupNode)
 			//crop leading hash and pop the last (duplicated) char
 			std::remove(colour.begin(), colour.end(), '#');
 			colour.pop_back();
-			debugColour = colourFromHex(colour.c_str());
+			debugColour = ColourFromHex(colour.c_str());
 		}
 		else debugColour = sf::Color(127u, 127u, 127u);
 		debugColour.a = static_cast<sf::Uint8>(255.f * layer.opacity);
-		object.createDebugShape(debugColour);
+		object.CreateDebugShape(debugColour);
 
 		//creates line segments from any available points
-		object.createSegments();
+		object.CreateSegments();
 
 		//add objects to vector
 		layer.objects.push_back(object);
@@ -934,7 +974,7 @@ bool MapLoader::parseObjectgroup(const pugi::xml_node& groupNode)
 	return true;
 }
 
-bool MapLoader::parseImageLayer(const pugi::xml_node& imageLayerNode)
+bool MapLoader::ParseImageLayer(const pugi::xml_node& imageLayerNode)
 {
 	LOG("Found image layer " + std::string(imageLayerNode.attribute("name").as_string()), Logger::Type::Info);
 
@@ -947,7 +987,7 @@ bool MapLoader::parseImageLayer(const pugi::xml_node& imageLayerNode)
 	}
 
 	std::string imageName = imageNode.attribute("source").as_string();
-	sf::Image image = loadImage(imageName);
+	sf::Image image = LoadImage(imageName);
 	if(m_failedImage)
 	{
 		LOG("Failed to load image at " + imageName, Logger::Type::Error);
@@ -958,7 +998,7 @@ bool MapLoader::parseImageLayer(const pugi::xml_node& imageLayerNode)
 	//set transparency if required
 	if(imageNode.attribute("trans"))
 	{
-		image.createMaskFromColor(colourFromHex(imageNode.attribute("trans").as_string()));
+		image.createMaskFromColor(ColourFromHex(imageNode.attribute("trans").as_string()));
 	}
 
 	//load image to texture
@@ -981,7 +1021,7 @@ bool MapLoader::parseImageLayer(const pugi::xml_node& imageLayerNode)
 
 	//parse layer properties
 	if(pugi::xml_node propertiesNode = imageLayerNode.child("properties"))
-		parseLayerProperties(propertiesNode, layer);
+		ParseLayerProperties(propertiesNode, layer);
 
 	//push back layer
 	m_layers.push_back(layer);
@@ -989,7 +1029,7 @@ bool MapLoader::parseImageLayer(const pugi::xml_node& imageLayerNode)
 	return true;
 }
 
-void MapLoader::parseLayerProperties(const pugi::xml_node& propertiesNode, MapLayer& layer)
+void MapLoader::ParseLayerProperties(const pugi::xml_node& propertiesNode, MapLayer& layer)
 {
 	pugi::xml_node propertyNode = propertiesNode.child("property");
 	while(propertyNode)
@@ -1002,38 +1042,38 @@ void MapLoader::parseLayerProperties(const pugi::xml_node& propertiesNode, MapLa
 	}
 }
 
-void MapLoader::createDebugGrid()
+void MapLoader::CreateDebugGrid()
 {
 	sf::Color debugColour(0u, 0u, 0u, 120u);
 	float mapHeight = static_cast<float>(m_tileHeight * m_height);
 	for(int x = 0; x <= m_width; x += 2)
 	{
 		float posX = static_cast<float>(x * (m_tileWidth / m_tileRatio));
-		m_gridVertices.append(sf::Vertex(isometricToOrthogonal(sf::Vector2f(posX, 0.f)), debugColour));
-		m_gridVertices.append(sf::Vertex(isometricToOrthogonal(sf::Vector2f(posX, mapHeight)), debugColour));
+		m_gridVertices.append(sf::Vertex(IsometricToOrthogonal(sf::Vector2f(posX, 0.f)), debugColour));
+		m_gridVertices.append(sf::Vertex(IsometricToOrthogonal(sf::Vector2f(posX, mapHeight)), debugColour));
 		posX += static_cast<float>(m_tileWidth) / m_tileRatio;
-		m_gridVertices.append(sf::Vertex(isometricToOrthogonal(sf::Vector2f(posX, mapHeight)), debugColour));
-		m_gridVertices.append(sf::Vertex(isometricToOrthogonal(sf::Vector2f(posX, 0.f)), debugColour));
+		m_gridVertices.append(sf::Vertex(IsometricToOrthogonal(sf::Vector2f(posX, mapHeight)), debugColour));
+		m_gridVertices.append(sf::Vertex(IsometricToOrthogonal(sf::Vector2f(posX, 0.f)), debugColour));
 		posX += static_cast<float>(m_tileWidth) / m_tileRatio;
-		m_gridVertices.append(sf::Vertex(isometricToOrthogonal(sf::Vector2f(posX, 0.f)), debugColour));
+		m_gridVertices.append(sf::Vertex(IsometricToOrthogonal(sf::Vector2f(posX, 0.f)), debugColour));
 	}
 	float mapWidth = static_cast<float>(m_tileWidth * (m_width / m_tileRatio));
 	for(int y = 0; y <= m_height; y += 2)
 	{
 		float posY = static_cast<float>(y *m_tileHeight);
-		m_gridVertices.append(sf::Vertex(isometricToOrthogonal(sf::Vector2f(0.f, posY)), debugColour));
+		m_gridVertices.append(sf::Vertex(IsometricToOrthogonal(sf::Vector2f(0.f, posY)), debugColour));
 		posY += static_cast<float>(m_tileHeight);
-		m_gridVertices.append(sf::Vertex(isometricToOrthogonal(sf::Vector2f(0.f, posY)), debugColour));
-		m_gridVertices.append(sf::Vertex(isometricToOrthogonal(sf::Vector2f(mapWidth, posY)), debugColour));
+		m_gridVertices.append(sf::Vertex(IsometricToOrthogonal(sf::Vector2f(0.f, posY)), debugColour));
+		m_gridVertices.append(sf::Vertex(IsometricToOrthogonal(sf::Vector2f(mapWidth, posY)), debugColour));
 		posY += static_cast<float>(m_tileHeight);
-		m_gridVertices.append(sf::Vertex(isometricToOrthogonal(sf::Vector2f(mapWidth, posY)), debugColour));
+		m_gridVertices.append(sf::Vertex(IsometricToOrthogonal(sf::Vector2f(mapWidth, posY)), debugColour));
 	}
 
 	m_gridVertices.setPrimitiveType(sf::LinesStrip);
 
 }
 
-void MapLoader::setIsometricCoords(MapLayer& layer)
+void MapLoader::SetIsometricCoords(MapLayer& layer)
 {
 	//float offset  = static_cast<float>(m_width * m_tileWidth) / 2.f;
 	for(auto tile = layer.tiles.begin(); tile != layer.tiles.end(); ++tile)
@@ -1044,19 +1084,19 @@ void MapLoader::setIsometricCoords(MapLayer& layer)
 	}
 }
 
-void MapLoader::drawLayer(sf::RenderTarget& rt, MapLayer& layer, bool debug)
+void MapLoader::DrawLayer(sf::RenderTarget& rt, MapLayer& layer, bool debug)
 {
 	rt.draw(layer);
 
 	if(debug && layer.type == ObjectGroup)
 	{
 		for(const auto& object : layer.objects)		
-			if(m_bounds.intersects(object.getAABB()))
-				object.drawDebugShape(rt);
+			if(m_bounds.intersects(object.GetAABB()))
+				object.DrawDebugShape(rt);
 	}
 }
 
-std::string MapLoader::fileFromPath(const std::string& path)
+std::string MapLoader::FileFromPath(const std::string& path)
 {
 	assert(!path.empty());
 
@@ -1071,7 +1111,7 @@ std::string MapLoader::fileFromPath(const std::string& path)
 	return path;
 }
 
-void MapLoader::draw(sf::RenderTarget& rt, sf::RenderStates /* states */) const
+void MapLoader::draw(sf::RenderTarget& rt, sf::RenderStates states) const
 {
 	sf::View view  = rt.getView();
 	if(view.getCenter() != m_lastViewPos)
@@ -1090,7 +1130,7 @@ void MapLoader::draw(sf::RenderTarget& rt, sf::RenderStates /* states */) const
 		m_bounds = bounds;
 
 		for(auto& layer : m_layers)
-			layer.cull(m_bounds);
+			layer.Cull(m_bounds);
 	}
 	m_lastViewPos = view.getCenter();
 
@@ -1099,7 +1139,7 @@ void MapLoader::draw(sf::RenderTarget& rt, sf::RenderStates /* states */) const
 }
 
 //decoding and utility functions
-sf::Color MapLoader::colourFromHex(const char* hexStr) const
+sf::Color MapLoader::ColourFromHex(const char* hexStr) const
 {
 	//TODO proper checking valid string length
 	unsigned int value, r, g, b;
@@ -1113,7 +1153,7 @@ sf::Color MapLoader::colourFromHex(const char* hexStr) const
 	return sf::Color(r, g, b);
 }
 
-bool MapLoader::decompress(const char* source, std::vector<unsigned char>& dest, int inSize, int expectedSize)
+bool MapLoader::Decompress(const char* source, std::vector<unsigned char>& dest, int inSize, int expectedSize)
 {
 	if(!source)
 	{
@@ -1122,7 +1162,7 @@ bool MapLoader::decompress(const char* source, std::vector<unsigned char>& dest,
 	}
 
 	int currentSize = expectedSize;
-    std::vector<unsigned char> byteArray(expectedSize / sizeof(unsigned char));
+	std::vector<unsigned char> byteArray(expectedSize / sizeof(unsigned char));
 	z_stream stream;
 	stream.zalloc = Z_NULL;
 	stream.zfree = Z_NULL;
@@ -1132,9 +1172,9 @@ bool MapLoader::decompress(const char* source, std::vector<unsigned char>& dest,
 	stream.next_out = (Bytef*)byteArray.data();
 	stream.avail_out = expectedSize;
 
-	if(inflateInit(&stream/*, 15 + 32*/) != Z_OK)
+	if(inflateInit2(&stream, 15 + 32) != Z_OK)
 	{
-		LOG("inflate init failed", Logger::Type::Error);
+		LOG("inflate 2 failed", Logger::Type::Error);
 		return false;
 	}
 
@@ -1159,7 +1199,7 @@ bool MapLoader::decompress(const char* source, std::vector<unsigned char>& dest,
 		{
 			int oldSize = currentSize;
 			currentSize *= 2;
-            std::vector<unsigned char> newArray(currentSize / sizeof(unsigned char));
+			std::vector<unsigned char> newArray(currentSize / sizeof(unsigned char));
 			std::memcpy(newArray.data(), byteArray.data(), currentSize / 2);
 			byteArray = std::move(newArray);
 			
@@ -1180,17 +1220,18 @@ bool MapLoader::decompress(const char* source, std::vector<unsigned char>& dest,
 	const int outSize = currentSize - stream.avail_out;
 	inflateEnd(&stream);
 
-    std::vector<unsigned char> newArray(outSize / sizeof(unsigned char));
+	std::vector<unsigned char> newArray(outSize / sizeof(unsigned char));
 	std::memcpy(newArray.data(), byteArray.data(), outSize);
 	byteArray = std::move(newArray);
 
 	//copy bytes to vector
-    dest.insert(dest.begin(), byteArray.begin(), byteArray.end());
+	int length = currentSize / sizeof(unsigned char);	
+	dest.insert(dest.begin(), byteArray.begin(), byteArray.end());
 
 	return true;
 }
 
-sf::Image& MapLoader::loadImage(const std::string& imageName)
+sf::Image& MapLoader::LoadImage(const std::string& imageName)
 {
 	for(const auto& p : m_searchPaths)
 	{
@@ -1219,7 +1260,7 @@ sf::Image& MapLoader::loadImage(const std::string& imageName)
 	}
 
 	m_cachedImages[path] = newImage;
-    return *m_cachedImages[path];
+	return *m_cachedImages[path];
 }
 
 
@@ -1239,12 +1280,12 @@ sf::Image& MapLoader::loadImage(const std::string& imageName)
    freely, subject to the following restrictions:
 
    1. The origin of this source code must not be misrepresented; you must not
-      claim that you wrote the original source code. If you use this source code
-      in a product, an acknowledgment in the product documentation would be
-      appreciated but is not required.
+	  claim that you wrote the original source code. If you use this source code
+	  in a product, an acknowledgment in the product documentation would be
+	  appreciated but is not required.
 
    2. Altered source versions must be plainly marked as such, and must not be
-      misrepresented as being the original source code.
+	  misrepresented as being the original source code.
 
    3. This notice may not be removed or altered from any source distribution.
 
@@ -1265,7 +1306,7 @@ static inline bool is_base64(unsigned char c)
 	return (isalnum(c) || (c == '+') || (c == '/'));
 }
 
-std::string base64_decode(std::string const& encoded_string)
+static std::string base64_decode(std::string const& encoded_string)
 {
 	int in_len = encoded_string.size();
 	int i = 0;
@@ -1310,5 +1351,5 @@ std::string base64_decode(std::string const& encoded_string)
 
 	return ret;
 }
-//int Logger::m_logFilter = (Type::Error | Type::Info | Type::Warning);
+int Logger::m_logFilter = (Type::Error | Type::Info | Type::Warning);
 };
