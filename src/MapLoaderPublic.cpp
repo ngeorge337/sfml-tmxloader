@@ -203,7 +203,8 @@ sf::Vector2u MapLoader::getMapSize() const
 
 std::string MapLoader::getPropertyString(const std::string& name)
 {
-	assert(m_properties.find(name) != m_properties.end());
+	//assert(m_properties.find(name) != m_properties.end());
+	if(m_properties.find(name) == m_properties.end()) return "";
 	return m_properties[name];
 }
 
