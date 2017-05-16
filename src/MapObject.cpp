@@ -29,6 +29,9 @@ it freely, subject to the following restrictions:
 #include <tmx/MapObject.h>
 #include <tmx/MapLayer.h>
 #include <tmx/Log.h>
+#include "token.h"
+
+#pragma warning(disable: 4267)
 
 using namespace tmx;
 
@@ -128,6 +131,7 @@ bool MapObject::Contains(sf::Vector2f point) const
 	//check if enough poly points
 	if(m_polypoints.size() < 3) return false;
 
+	/*
 	//else raycast through points
 	unsigned int i, j;
 	bool result = false;
@@ -137,6 +141,24 @@ bool MapObject::Contains(sf::Vector2f point) const
 		(point.x < (m_polypoints[j].x - m_polypoints[i].x) * (point.y - m_polypoints[i].y)
 			/ (m_polypoints[j].y - m_polypoints[i].y) + m_polypoints[i].x))
 				result = !result;
+	}
+	return result;
+	*/
+
+	//else raycast through points
+	unsigned int i, j;
+	bool result = false;
+	for(i = 0, j = m_polypoints.size() - 1; i < m_polypoints.size(); j = i++)
+	{
+		float val = (m_polypoints[j].x - m_polypoints[i].x) * (point.y - m_polypoints[i].y)
+			/ (m_polypoints[j].y - m_polypoints[i].y) + m_polypoints[i].x;
+		if((m_polypoints[i].y > point.y) != (m_polypoints[j].y > point.y))
+		{
+			if(val == point.x)
+				return true;
+			else if(point.x < val)
+				result = !result;
+		}
 	}
 	return result;
 }
@@ -232,6 +254,16 @@ void MapObject::CreateSegments()
 		return;
 	}
 	
+	if(m_polypoints.size() > 2)
+	{
+		m_convexShape.setPosition(GetPosition());
+		m_convexShape.setPointCount(m_polypoints.size());
+		for(auto i = 0u; i < m_polypoints.size(); i++)
+		{
+			m_convexShape.setPoint(i, m_polypoints[i]);
+		}
+	}
+	
 	for(auto i = 0u; i < m_polypoints.size() - 1; i++)
 	{
 		m_polySegs.push_back(Segment(m_polypoints[i], m_polypoints[i + 1]));
@@ -275,6 +307,12 @@ const std::vector<sf::Vector2f>& MapObject::PolyPoints()const
 void MapObject::ReverseWinding()
 {
 	std::reverse(m_polypoints.begin(), m_polypoints.end());
+
+	m_convexShape.setPointCount(m_polypoints.size());
+	for(auto i = 0u; i < m_polypoints.size(); i++)
+	{
+		m_convexShape.setPoint(i, m_polypoints[i]);
+	}
 }
 
 void MapObject::SetQuad(TileQuad* quad)
@@ -378,4 +416,19 @@ void MapObject::CreateAABB()
 		//m_debugShape.append(sf::Vector2f(m_AABB.left + m_AABB.width, m_AABB.top + m_AABB.height));
 		//m_debugShape.append(sf::Vector2f(m_AABB.left, m_AABB.top + m_AABB.height));
 	}
+}
+
+void tmx::MapObject::SetParent(const std::string& parent)
+{
+	m_parent = parent; std::hash<std::string> hashfn; std::string temp = parent; set_lowercase(temp); m_parentHash = hashfn(temp);
+}
+
+float tmx::MapObject::GetRotation() const
+{
+	return m_Rotation;
+}
+
+void tmx::MapObject::SetRotation(float r)
+{
+	m_Rotation = r;
 }

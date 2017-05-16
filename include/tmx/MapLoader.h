@@ -30,7 +30,7 @@ it freely, subject to the following restrictions:
 #ifndef MAP_LOADER_H_
 #define MAP_LOADER_H_
 
-#include <tmx/QuadTreeNode.h>
+#include <tmx/TMXQuadTreeNode.h>
 #include <tmx/MapLayer.h>
 
 #include <pugixml/pugixml.hpp>
@@ -89,9 +89,9 @@ namespace tmx
 		//sets the shader property of a layer's rendering states member
 		void SetLayerShader(sf::Uint16 layerId, const sf::Shader& shader);
 		//so we can test if QuadTree is available
-        bool QuadTreeAvailable() const;
+		bool QuadTreeAvailable() const;
 
-    private:
+	private:
 		//properties which correspond to tmx
 		sf::Uint16 m_width, m_height; //tile count
 		sf::Uint16 m_tileWidth, m_tileHeight; //width / height of tiles
@@ -133,9 +133,9 @@ namespace tmx
 		bool ParseMapNode(const pugi::xml_node& mapNode);
 		bool ParseTileSets(const pugi::xml_node& mapNode);
 		bool ProcessTiles(const pugi::xml_node& tilesetNode);
-        bool ParseCollectionOfImages(const pugi::xml_node& tilesetNode);
+		bool ParseCollectionOfImages(const pugi::xml_node& tilesetNode);
 		bool ParseLayer(const pugi::xml_node& layerNode);
-        TileQuad* AddTileToLayer(MapLayer& layer, sf::Uint16 x, sf::Uint16 y, sf::Uint32 gid, const sf::Vector2f& offset = sf::Vector2f());
+		TileQuad* AddTileToLayer(MapLayer& layer, sf::Uint16 x, sf::Uint16 y, sf::Uint32 gid, const sf::Vector2f& offset = sf::Vector2f(), const float rotationAmount = 0.f, const sf::Vector2f &scaleSize = sf::Vector2f(0, 0));
 		bool ParseObjectgroup(const pugi::xml_node& groupNode);
 		bool ParseImageLayer(const pugi::xml_node& imageLayerNode);
 		void ParseLayerProperties(const pugi::xml_node& propertiesNode, MapLayer& destLayer);
@@ -159,21 +159,21 @@ namespace tmx
 		std::map<std::string, std::shared_ptr<sf::Image> >m_cachedImages;
 		bool m_failedImage;
 
-        //Reading the flipped bits
-        std::vector<unsigned char> IntToBytes(sf::Uint32 paramInt);
-        std::pair<sf::Uint32, std::bitset<3> > ResolveRotation(sf::Uint32 gid);
+		//Reading the flipped bits
+		std::vector<unsigned char> IntToBytes(sf::Uint32 paramInt);
+		std::pair<sf::Uint32, std::bitset<3> > ResolveRotation(sf::Uint32 gid);
 
-        //Image flip functions
-        void FlipY(sf::Vector2f *v0, sf::Vector2f *v1, sf::Vector2f *v2, sf::Vector2f *v3);
-        void FlipX(sf::Vector2f *v0, sf::Vector2f *v1, sf::Vector2f *v2, sf::Vector2f *v3);
-        void FlipD(sf::Vector2f *v0, sf::Vector2f *v1, sf::Vector2f *v2, sf::Vector2f *v3);
+		//Image flip functions
+		void FlipY(sf::Vector2f *v0, sf::Vector2f *v1, sf::Vector2f *v2, sf::Vector2f *v3);
+		void FlipX(sf::Vector2f *v0, sf::Vector2f *v1, sf::Vector2f *v2, sf::Vector2f *v3);
+		void FlipD(sf::Vector2f *v0, sf::Vector2f *v1, sf::Vector2f *v2, sf::Vector2f *v3);
 
-        void DoFlips(std::bitset<3> bits,sf::Vector2f *v0, sf::Vector2f *v1, sf::Vector2f *v2, sf::Vector2f *v3);
-    };
+		void DoFlips(std::bitset<3> bits,sf::Vector2f *v0, sf::Vector2f *v1, sf::Vector2f *v2, sf::Vector2f *v3);
+	};
 
 
 	//method for decoding base64 encoded strings
-  std::string base64_decode(std::string const& string);
+	static std::string base64_decode(std::string const& string);
 }
 
 #endif //MAP_LOADER_H_

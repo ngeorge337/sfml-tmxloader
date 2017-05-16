@@ -38,6 +38,10 @@ it freely, subject to the following restrictions:
 
 #include <SFML/Graphics/Color.hpp>
 #include <SFML/Graphics/Drawable.hpp>
+// [NG] Shape headers
+#include <SFML/Graphics/Shape.hpp>
+#include <SFML/Graphics/ConvexShape.hpp>
+
 #include <SFML/Graphics/Font.hpp>
 #include <SFML/Graphics/Image.hpp>
 #include <SFML/Graphics/VertexArray.hpp>
@@ -98,8 +102,14 @@ namespace tmx
 		std::string GetType() const {return m_type;};
 		//returns the name of the object's parent layer
 		std::string GetParent() const {return m_parent;};
+
+		// [NG] Get hashed parent
+		size_t GetHashedParent() const { return m_parentHash; };
+
 		//returns the objects AABB in world coordinates
 		sf::FloatRect GetAABB() const {return m_AABB;};
+
+		sf::Vector2f GetSize() const { return m_size; }
 		//returns visibility
 		bool Visible() const {return m_visible;}
 		//sets a property value, or adds it if property doesn't exist
@@ -117,7 +127,7 @@ namespace tmx
 		//sets the object's type
 		void SetType(const std::string& type){m_type = type;};
 		//sets the name of the object's parent layer
-		void SetParent(const std::string& parent){m_parent = parent;};
+		void SetParent(const std::string& parent);;
 		//sets the shape type
 		void SetShapeType(MapObjectShape shape){m_shape = shape;};
 		//sets visibility
@@ -125,6 +135,12 @@ namespace tmx
 		//adds a point to the list of polygonal points. If calling this manually
 		//call CreateDebugShape() afterwards to rebuild debug output
 		void AddPoint(const sf::Vector2f& point){m_polypoints.push_back(point);};
+
+		// [NG] Cached sf::Shape for intersection operations
+		const sf::ConvexShape &GetShape() { return m_convexShape; }
+
+		float GetRotation() const;
+		void SetRotation(float r);
 
 		//checks if an object contains given point in world coords.
 		//Always returns false for polylines.
@@ -165,6 +181,8 @@ private:
 		DebugShape m_debugShape;
 		sf::Vector2f m_centrePoint;
 
+		float m_Rotation;
+
 		std::vector<Segment> m_polySegs; //segments which make up shape, if any
 		TileQuad* m_tileQuad;
 		
@@ -173,6 +191,12 @@ private:
 		//Note that the position of this box many not necessarily match the MapObject's position, as polygonal
 		//points may have negative values relative to the object's world position.
 		sf::FloatRect m_AABB; 
+
+		// [NG] Convex shape
+		sf::ConvexShape m_convexShape;
+
+		// [NG] Parent string as hashed number
+		size_t m_parentHash;
 
 		//returns centre of poly shape if available, else centre of
 		//bounding rectangle in world space

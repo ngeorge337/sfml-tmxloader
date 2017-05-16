@@ -46,6 +46,8 @@ source distribution.
 #include <cassert>
 #include <array>
 
+#pragma warning(disable: 4267)
+
 namespace
 {
 	//this scales tmx units into box2D metres
@@ -221,6 +223,7 @@ BodyCreator::Shapes BodyCreator::m_ProcessConvex(const Shape& points)
 	for (auto i = 0u; i <= shapeCount; i++)
 	{
 		Shape shape;
+		sf::Uint16 total = 0u;
 		for (auto j = 0u; j < maxVerts; j++)
 		{
 			sf::Uint16 index = i * maxVerts + j;
